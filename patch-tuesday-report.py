@@ -188,13 +188,27 @@ try:
     # Sort vulnerabilities by priority, then severity (Critical first), then by CVSS score (high to low)
     sorted_vulnerabilities = sorted(filtered_vulnerabilities, key=lambda v: (sort_priority(v), severity_rank(v), -v["cvss_score"]))
 
-    # Build the HTML report in memory
-    html_parts = []
-    html_parts.append("<html><head><meta charset='utf-8'><title>Patch Tuesday Report</title></head><body>")
-    html_parts.append(f"<h1>Vulnerabilities with release date {target_date}:</h1><br>")
+    # Helpers to render small colour-coded badges for severity / status / disclosure
+    def severity_class(severity):
+        return {"Critical": "sev-critical", "Important": "sev-important", "Moderate": "sev-moderate", "Low": "sev-low"}.get(severity, "sev-default")
 
-    # Total CVE count
-    html_parts.append(f"<p><strong>Total CVEs with release date {target_date}:</strong> {cve_count}</p>")
+    def badge(text, cls):
+        return f'<span class="badge {cls}">{text}</span>'
+
+    def severity_badge(severity):
+        return badge(severity, severity_class(severity))
+
+    def status_badge(status):
+        cls_map = {
+            "Exploitation Detected": "sev-critical",
+            "Exploitation More Likely": "sev-important",
+            "Exploitation Less Likely": "sev-moderate",
+            "Exploitation Unlikely": "sev-low",
+        }
+        return badge(status, cls_map.get(status, "sev-default"))
+
+    def disclosed_badge(value):
+        return badge(value, "sev-critical" if value == "Yes" else "sev-default")
 
     # Counters for the exploitation statuses
     exploitation_detected_count = sum(1 for vuln in processed_vulnerabilities if vuln["latest_status"] == "Exploitation Detected")
@@ -202,51 +216,169 @@ try:
     exploitation_more_likely_count = sum(1 for vuln in processed_vulnerabilities if vuln["latest_status"] == "Exploitation More Likely")
     critical_count = sum(1 for vuln in processed_vulnerabilities if vuln["severity"] == "Critical")
 
-    html_parts.append(f"<p><strong>Total Exploited in the wild:</strong> {exploitation_detected_count}</p>")
-    html_parts.append(f"<p><strong>Total Publicly Disclosed:</strong> {publicly_disclosed_count}</p>")
-    html_parts.append(f"<p><strong>Total Exploitation More Likely:</strong> {exploitation_more_likely_count}</p>")
-    html_parts.append(f"<p><strong>Total Critical:</strong> {critical_count}</p>")
-    html_parts.append(f"<p><strong>Total vulnerabilities matching selection criteria:</strong> {len(sorted_vulnerabilities)}</p>")
+    # Build the HTML report in memory
+    html_parts = []
+    html_parts.append("<html><head><meta charset='utf-8'><title>Patch Tuesday Report</title><style>")
+    html_parts.append("""
+        :root {
+            --bg: #f4f6f8;
+            --card-bg: #ffffff;
+            --border: #dde3ea;
+            --text: #202832;
+            --muted: #5c6a78;
+            --accent: #2f6fed;
+            --critical: #c62828;
+            --important: #e07b00;
+            --moderate: #b8960b;
+            --low: #2e7d32;
+            --default: #6b7785;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 24px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Segoe UI, Calibri, Arial, Helvetica, sans-serif;
+            line-height: 1.5;
+        }
+        .container { max-width: 1100px; margin: 0 auto; }
+        h1 { font-size: 26px; margin-bottom: 4px; }
+        h2 {
+            font-size: 20px;
+            margin-top: 36px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid var(--border);
+        }
+        h3.vuln-title { margin: 0 0 6px 0; font-size: 17px; }
+        p { margin: 6px 0; }
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 16px 0 8px 0;
+        }
+        .stat {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 16px;
+            min-width: 140px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .stat .value { font-size: 22px; font-weight: 600; }
+        .stat .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+        .badge {
+            display: inline-block;
+            padding: 2px 9px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .badge.sev-critical { background: var(--critical); }
+        .badge.sev-important { background: var(--important); }
+        .badge.sev-moderate { background: var(--moderate); }
+        .badge.sev-low { background: var(--low); }
+        .badge.sev-default { background: var(--default); }
+        .vuln-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-left: 5px solid var(--default);
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 14px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .vuln-card.sev-critical { border-left-color: var(--critical); }
+        .vuln-card.sev-important { border-left-color: var(--important); }
+        .vuln-card.sev-moderate { border-left-color: var(--moderate); }
+        .vuln-card.sev-low { border-left-color: var(--low); }
+        .vuln-card .meta { margin: 6px 0; }
+        .vuln-card .field-label { color: var(--muted); font-weight: 600; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        thead th {
+            position: sticky;
+            top: 0;
+            background: var(--accent);
+            color: #fff;
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 13px;
+        }
+        tbody td {
+            padding: 8px 12px;
+            border-top: 1px solid var(--border);
+            font-size: 13px;
+            vertical-align: top;
+        }
+        tbody tr:nth-child(even) { background: #f8fafc; }
+        tbody tr:hover { background: #eef3fd; }
+        .table-wrap { overflow-x: auto; }
+        hr.sep { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+    """)
+    html_parts.append("</style></head><body><div class='container'>")
+    html_parts.append(f"<h1>Vulnerabilities with release date {target_date}</h1>")
 
-    html_parts.append("<h2>Short summary</h2><br>")
-    for vuln in sorted_vulnerabilities:
-        html_parts.append(f"<b>{vuln['cve']} ({vuln['cvss_score']}) - {vuln['title']}</b><br>")
-        html_parts.append(f"<b>Publicly disclosed:</b> {vuln['publicly_disclosed']} - <b>Exploitation status:</b> {vuln['latest_status']} <br>")
-        html_parts.append(f"{vuln['cwe_id']}: {vuln['cwe_description']} <br>")
-        if vuln['executive_summary']:
-            html_parts.append(f"<strong>Executive Summary:</strong> {vuln['executive_summary']}<br>")
-        html_parts.append(f"{vuln['faq']}<br>")
-        html_parts.append("-" * 50 + " </p>")
+    # Top-level stats
+    html_parts.append("<div class='stats'>")
+    html_parts.append(f"<div class='stat'><div class='value'>{cve_count}</div><div class='label'>Total CVEs</div></div>")
+    html_parts.append(f"<div class='stat'><div class='value'>{exploitation_detected_count}</div><div class='label'>Exploited in the wild</div></div>")
+    html_parts.append(f"<div class='stat'><div class='value'>{publicly_disclosed_count}</div><div class='label'>Publicly disclosed</div></div>")
+    html_parts.append(f"<div class='stat'><div class='value'>{exploitation_more_likely_count}</div><div class='label'>Exploitation more likely</div></div>")
+    html_parts.append(f"<div class='stat'><div class='value'>{critical_count}</div><div class='label'>Critical</div></div>")
+    html_parts.append(f"<div class='stat'><div class='value'>{len(sorted_vulnerabilities)}</div><div class='label'>Matching selection criteria</div></div>")
+    html_parts.append("</div>")
 
-    html_parts.append("<h2>Summary</h2><br>")
+    html_parts.append("<h2>Short summary</h2>")
     for vuln in sorted_vulnerabilities:
-        html_parts.append(f"<h2>{vuln['cve']} <br></h2>")
-        html_parts.append(f" <strong><p>Title: </strong> {vuln['title']} </p>")
-        html_parts.append(f" <strong><p>Release Date: </strong> {vuln['release_date']} </p>")
-        html_parts.append(f" <strong><p>Publicly Disclosed: </strong> {vuln['publicly_disclosed']} </p>")
-        html_parts.append(f" <strong><p>Exploitation Status: </strong> {vuln['latest_status']} </p>")
-        html_parts.append(f" <strong><p>Severity: </strong> {vuln['severity']} <p>")
-        html_parts.append(f" <strong><p>CVSS Score: </strong> {vuln['cvss_score']} <p>")
-        html_parts.append(f" <strong><p>CWE ID: </strong> {vuln['cwe_id']}: {vuln['cwe_description']} </p>")
-        html_parts.append(f" <strong><p>Impacted Products: </strong></p><p> {vuln['products']} </p>")
-        html_parts.append(f" <strong><p>Impact: </strong> {vuln['impact']} <//p>")
+        html_parts.append(f"<div class='vuln-card {severity_class(vuln['severity'])}'>")
+        html_parts.append(f"<h3 class='vuln-title'>{vuln['cve']} ({vuln['cvss_score']}) - {vuln['title']}</h3>")
+        html_parts.append(f"<div class='meta'><span class='field-label'>Publicly disclosed:</span> {disclosed_badge(vuln['publicly_disclosed'])} &nbsp; <span class='field-label'>Exploitation status:</span> {status_badge(vuln['latest_status'])}</div>")
+        html_parts.append(f"<div class='meta'>{vuln['cwe_id']}: {vuln['cwe_description']}</div>")
         if vuln['executive_summary']:
-            html_parts.append(f" <strong><p>Executive Summary: </strong></p><p> {vuln['executive_summary']} </p>")
-        html_parts.append(f" <strong><p>FAQ: </strong></p><p> {vuln['faq']} </p>")
-        html_parts.append("-" * 50 + " </p>")
+            html_parts.append(f"<div class='meta'><span class='field-label'>Executive Summary:</span> {vuln['executive_summary']}</div>")
+        html_parts.append(f"<div class='meta'>{vuln['faq']}</div>")
+        html_parts.append("</div>")
+
+    html_parts.append("<h2>Summary</h2>")
+    for vuln in sorted_vulnerabilities:
+        html_parts.append(f"<div class='vuln-card {severity_class(vuln['severity'])}'>")
+        html_parts.append(f"<h3 class='vuln-title'>{vuln['cve']}</h3>")
+        html_parts.append(f"<p><span class='field-label'>Title:</span> {vuln['title']}</p>")
+        html_parts.append(f"<p><span class='field-label'>Release Date:</span> {vuln['release_date']}</p>")
+        html_parts.append(f"<p><span class='field-label'>Publicly Disclosed:</span> {disclosed_badge(vuln['publicly_disclosed'])}</p>")
+        html_parts.append(f"<p><span class='field-label'>Exploitation Status:</span> {status_badge(vuln['latest_status'])}</p>")
+        html_parts.append(f"<p><span class='field-label'>Severity:</span> {severity_badge(vuln['severity'])}</p>")
+        html_parts.append(f"<p><span class='field-label'>CVSS Score:</span> {vuln['cvss_score']}</p>")
+        html_parts.append(f"<p><span class='field-label'>CWE ID:</span> {vuln['cwe_id']}: {vuln['cwe_description']}</p>")
+        html_parts.append(f"<p><span class='field-label'>Impacted Products:</span> {vuln['products']}</p>")
+        html_parts.append(f"<p><span class='field-label'>Impact:</span> {vuln['impact']}</p>")
+        if vuln['executive_summary']:
+            html_parts.append(f"<p><span class='field-label'>Executive Summary:</span> {vuln['executive_summary']}</p>")
+        html_parts.append(f"<p><span class='field-label'>FAQ:</span> {vuln['faq']}</p>")
+        html_parts.append("</div>")
 
     # HTML Table Generation
     html_parts.append(f"<p><strong>Total vulnerabilities matching selection criteria:</strong> {len(sorted_vulnerabilities)}</p>")
-    html_parts.append("<h2>Table</h2><br>")
-    table_html = "<table border='1'><thead><tr><th>CVE ID</th><th>Title</th><th>Publicly Disclosed</th><th>Exploitation Status</th><th>Severity</th><th>CVSS Score</th><th>Impacted Products</th><th>Impact</th></tr></thead><tbody>"
+    html_parts.append("<h2>Table</h2>")
+    html_parts.append("<div class='table-wrap'>")
+    table_html = "<table><thead><tr><th>CVE ID</th><th>Title</th><th>Publicly Disclosed</th><th>Exploitation Status</th><th>Severity</th><th>CVSS Score</th><th>Impacted Products</th><th>Impact</th></tr></thead><tbody>"
     for vuln in sorted_vulnerabilities:
         table_html += f"""
             <tr>
                 <td>{vuln['cve']}</td>
                 <td>{vuln['title']}</td>
-                <td>{vuln['publicly_disclosed']}</td>
-                <td>{vuln['latest_status']}</td>
-                <td>{vuln['severity']}</td>
+                <td>{disclosed_badge(vuln['publicly_disclosed'])}</td>
+                <td>{status_badge(vuln['latest_status'])}</td>
+                <td>{severity_badge(vuln['severity'])}</td>
                 <td>{vuln['cvss_score']}</td>
                 <td>{vuln['products']}</td>
                 <td>{vuln['impact']}</td>
@@ -254,7 +386,8 @@ try:
         """
     table_html += "</tbody></table>"
     html_parts.append(table_html)
-    html_parts.append("</body></html>")
+    html_parts.append("</div>")
+    html_parts.append("</div></body></html>")
 
     # Write the HTML report to disk
     with open(html_path, "w", encoding="utf-8") as html_file:
