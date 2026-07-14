@@ -6,7 +6,7 @@ import os
 sys.stdout.reconfigure(encoding="utf-8")
 
 # Define the API URL for December 2024 Patch Tuesday release
-url = "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-Jun"
+url = "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-Jul"
 
 # Define headers (if authentication is required, include tokens or API keys here)
 headers = {
@@ -14,7 +14,7 @@ headers = {
 }
 
 # Target release date
-target_date = "2026-06-09"
+target_date = "2026-07-14"
 
 # Where to write the generated report files
 output_dir = os.path.dirname(os.path.abspath(__file__))
